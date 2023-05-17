@@ -18,7 +18,9 @@ MAX_SPEED = 2
 MAX_STEER = 0.4
 NOISE_FACTOR = 0.0
 NUM_SCANS = 2
-NUM_LASERS = 20
+NUM_LASERS = 30
+
+FILENAME = "30_beams_2_scan_aut_1ms_actor"
 
 class SACAgent:
     def __init__(self, filepath):
@@ -39,7 +41,7 @@ class SACAgentNode (Node):
         self.drive_pub = self.create_publisher(AckermannDriveStamped, '/drive', 10)
         self.timer = self.create_timer(0.1, self.timer_callback)
         self.start_time = None
-        nn_path = '/home/hammaad/sim_ws/src/sac_agent_pkg/Data/Main_Agent/gamma_0.99.pth'
+        nn_path = "/home/hammaad/sim_ws/src/sac_agent_pkg/Data/Main_Agent/" + FILENAME + ".pth"
         self.scan_buffer = np.zeros((NUM_SCANS, NUM_LASERS))
         self.lidar_state = np.zeros(NUM_SCANS * NUM_LASERS)
         self.lap_complete = False
@@ -47,7 +49,6 @@ class SACAgentNode (Node):
 
         self.agent = SACAgent(nn_path)
         self.position_history = []
-        self.speed_history = []
         self.steering_angle_history = []        
         self.speed_output_history = []
 
@@ -56,12 +57,15 @@ class SACAgentNode (Node):
         ranges = self.add_noise(ranges, NOISE_FACTOR)
         
         # Normalize ranges
-        scaled_ranges = ranges/30
+        scaled_ranges = ranges/10
         # get 20 beams out of the 1080 by averaging every 54 beams
         # 30 beams would be 36
         # 10 beams is 108
         ranges = np.clip(scaled_ranges, 0, 1)
-        mean_ranges = np.mean(ranges.reshape(-1, 54), axis=1)
+
+        mean_ranges = ranges[::36]
+
+        # mean_ranges = np.mean(ranges.reshape(-1, 36), axis=1)
         
         # FOR REAL CAR #
         # mean_ranges = np.mean(ranges[:-1].reshape(-1, 54), axis=1)
@@ -104,7 +108,6 @@ class SACAgentNode (Node):
         self.twist = msg.twist.twist
 
         self.position_history.append((self.pose.position.x, self.pose.position.y))
-        self.speed_history.append(self.twist.linear.x)
 
         current_position = (self.pose.position.x, self.pose.position.y)
         if self.start_time is None:
@@ -116,8 +119,6 @@ class SACAgentNode (Node):
             self.start_time = self.get_clock().now()
 
         self.position_history.append(current_position)
-        self.speed_history.append(self.twist.linear.x)
-
 
     # NEW #
     def add_noise(self, ranges, noise_factor):
@@ -126,28 +127,24 @@ class SACAgentNode (Node):
         return noisy_ranges
 
     def save_data_to_file(self):
-        folder_name = f"PLOTS/speed_{MAX_SPEED}_{NOISE_FACTOR}_data"
+        folder_name = f"PLOTS/speed_{MAX_SPEED}_{NOISE_FACTOR}_{FILENAME}_data"
         os.makedirs(folder_name, exist_ok=True)
 
         position_file_path = os.path.join(folder_name, 'position_history.csv')
-        speed_file_path = os.path.join(folder_name, 'speed_history.csv')
         steering_angle_file_path = os.path.join(folder_name, 'steering_angle_history.csv')
         speed_output_file_path = os.path.join(folder_name, 'speed_output_history.csv')
 
-        with open(position_file_path, 'w', newline='') as position_file, open(speed_file_path, 'w', newline='') as speed_file, open(steering_angle_file_path, 'w', newline='') as steering_angle_file, open(speed_output_file_path, 'w', newline='') as speed_output_file:
+        with open(position_file_path, 'w', newline='') as position_file, open(steering_angle_file_path, 'w', newline='') as steering_angle_file, open(speed_output_file_path, 'w', newline='') as speed_output_file:
             position_writer = csv.writer(position_file)
-            speed_writer = csv.writer(speed_file)
             steering_angle_writer = csv.writer(steering_angle_file)
             speed_output_writer = csv.writer(speed_output_file)
 
             position_writer.writerow(['x', 'y'])
-            speed_writer.writerow(['speed'])
             steering_angle_writer.writerow(['steering_angle'])
             speed_output_writer.writerow(['speed_output'])
 
-            for pos, speed, angle, speed_output in zip(self.position_history, self.speed_history, self.steering_angle_history, self.speed_output_history):
+            for pos, angle, speed_output in zip(self.position_history, self.steering_angle_history, self.speed_output_history):
                 position_writer.writerow(pos)
-                speed_writer.writerow([speed])
                 steering_angle_writer.writerow([angle])
                 speed_output_writer.writerow([speed_output])
 
@@ -175,7 +172,7 @@ def main(args = None):
     except KeyboardInterrupt:
         pass
     finally:
-        # sac_agent_node.save_data_to_file()
+        sac_agent_node.save_data_to_file()
         sac_agent_node.destroy_node()
         rclpy.shutdown()
 
